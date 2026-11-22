@@ -12,6 +12,10 @@
     "opener:allow-open-url",
     "core:window:allow-hide",
     "core:window:allow-show",
-    "core:event:default"
+    "core:event:default",
+    "dialog:allow-open",
+    "notification:default",
+    "opener:allow-reveal-item-in-dir",
+    "opener:allow-open-path"
   ]
 }

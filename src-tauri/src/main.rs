@@ -2,6 +2,8 @@
 // only forwards the UI's requests to it over loopback.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod files;
+
 use belfry_proto::code::RoomCode;
 use belfry_proto::*;
 use serde::Serialize;
@@ -240,6 +242,73 @@ fn wait_for_service() -> Result<(), String> {
 }
 
 
+
+// ---------- chat & files ----------
+
+#[tauri::command]
+async fn chat_list(id: String, since: u64) -> Result<Vec<ChatMsg>, String> {
+    blocking(move || call("GET", &format!("/v1/rooms/{id}/chat?since={since}"), None)).await
+}
+
+#[tauri::command]
+async fn chat_send(id: String, text: String) -> Result<ChatMsg, String> {
+    let body = serde_json::to_value(ChatPost { text, file: None }).unwrap();
+    blocking(move || call("POST", &format!("/v1/rooms/{id}/chat"), Some(body))).await
+}
+
+/// Starts serving a file and posts it in the room's chat.
+#[tauri::command]
+async fn share_file(
+    shares: tauri::State<'_, std::sync::Arc<files::Shares>>,
+    id: String,
+    path: String,
+) -> Result<ChatMsg, String> {
+    let shares = shares.inner().clone();
+    blocking(move || {
+        let status: Status = call("GET", "/v1/status", None)?;
+        let room = status.rooms.into_iter().find(|r| r.id == id).ok_or("API: room not found")?;
+        let share = files::new_share(std::path::Path::new(&path), &id, &room.peer_key, &room.cidr)?;
+        let body = serde_json::to_value(ChatPost { text: String::new(), file: Some(share.offer()) }).unwrap();
+        shares.add(share.clone());
+        call::<ChatMsg>("POST", &format!("/v1/rooms/{id}/chat"), Some(body)).inspect_err(|_| shares.remove(&share.id))
+    })
+    .await
+}
+
+#[tauri::command]
+fn unshare_file(shares: tauri::State<'_, std::sync::Arc<files::Shares>>, file_id: String) {
+    shares.remove(&file_id);
+}
+
+#[tauri::command]
+fn my_shares(shares: tauri::State<'_, std::sync::Arc<files::Shares>>) -> Vec<String> {
+    shares.ids()
+}
+
+#[tauri::command]
+fn forget_room_shares(shares: tauri::State<'_, std::sync::Arc<files::Shares>>, id: String) {
+    shares.remove_room(&id);
+}
+
+fn download_dir(app: &tauri::AppHandle) -> PathBuf {
+    if let Ok(d) = std::env::var("BELFRY_DOWNLOAD_DIR") {
+        return d.into();
+    }
+    app.path()
+        .download_dir()
+        .or_else(|_| app.path().home_dir())
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("Belfry")
+}
+
+/// Progress arrives as `download-progress` events.
+#[tauri::command]
+fn download_file(app: tauri::AppHandle, msg_id: String, ip: String, file: FileOffer, key: String) {
+    let dir = download_dir(&app);
+    let emitter = app.clone();
+    files::download(move |p| { let _ = emitter.emit("download-progress", p); }, dir, msg_id, ip, file, key);
+}
+
 // ---------- tray ----------
 
 /// Tray state shared with the window-close handler.
@@ -408,6 +477,8 @@ fn main() {
         })
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -427,9 +498,25 @@ fn main() {
             hide_window,
             quit_app,
             check_update,
-            install_update
+            install_update,
+            chat_list,
+            chat_send,
+            share_file,
+            unshare_file,
+            my_shares,
+            forget_room_shares,
+            download_file
         ])
         .setup(|app| {
+            let shares_file = std::env::var("BELFRY_SHARES_FILE").map(PathBuf::from).unwrap_or_else(|_| {
+                app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from(".")).join("shares.json")
+            });
+            let shares = files::Shares::load(shares_file);
+            {
+                let shares = shares.clone();
+                std::thread::spawn(move || files::serve(shares));
+            }
+            app.manage(shares);
             if let Err(e) = build_tray(app) {
                 eprintln!("tray unavailable: {e}");
             }

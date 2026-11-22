@@ -51,6 +51,7 @@ struct Public {
 
 pub struct Daemon {
     pub data_dir: PathBuf,
+    pub chat: crate::chat::ChatStore,
     pub engine: Engine,
     engine_version: String,
     rooms: Mutex<Vec<Room>>,
@@ -80,6 +81,7 @@ impl Daemon {
         let rooms = rooms.into_iter().filter(|r| RoomCode::decode(&r.code).is_ok()).collect();
         let engine_version = engine.version();
         Arc::new(Daemon {
+            chat: crate::chat::ChatStore::new(data_dir.join("chat")),
             data_dir,
             engine,
             engine_version,
@@ -201,6 +203,7 @@ impl Daemon {
         drop(rooms);
         self.runs.lock().unwrap().remove(id).map(kill_run);
         let _ = std::fs::remove_file(self.log_path(id));
+        self.chat.delete(id);
         Ok(())
     }
 
@@ -326,6 +329,117 @@ impl Daemon {
         }
     }
 
+
+    // ---------- chat ----------
+
+    fn room_by_id(&self, id: &str) -> Option<Room> {
+        self.rooms.lock().unwrap().iter().find(|r| r.id() == id).cloned()
+    }
+
+    /// A message typed in this machine's app: store it, then deliver it.
+    pub fn post_chat(&self, id: &str, post: ChatPost) -> Result<ChatMsg, String> {
+        let text: String = post.text.trim().chars().take(MAX_CHAT_TEXT).collect();
+        if text.is_empty() && post.file.is_none() {
+            return Err("empty message".into());
+        }
+        let v = self.view(id).ok_or("room not found")?;
+        let my_ip = match (v.state, v.my_ip.clone()) {
+            (RoomState::Online, Some(ip)) => ip,
+            _ => return Err("the room is not connected".into()),
+        };
+        let msg = ChatMsg {
+            id: hex(&belfry_proto::code::random_bytes::<12>()),
+            seq: 0,
+            ts: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
+            from: v.nickname.clone(),
+            from_ip: my_ip,
+            text,
+            file: post.file,
+            mine: true,
+        };
+        let stored = self.chat.insert(id, msg).ok_or("duplicate message")?;
+        let targets: Vec<String> =
+            v.members.iter().filter(|m| m.link != Link::Me).map(|m| m.ip.clone()).collect();
+        let (room_id, key, out) = (id.to_string(), v.peer_key.clone(), stored.clone());
+        std::thread::spawn(move || {
+            let workers: Vec<_> = targets
+                .into_iter()
+                .map(|ip| {
+                    let (room_id, key, out) = (room_id.clone(), key.clone(), out.clone());
+                    std::thread::spawn(move || {
+                        // Members who miss it catch up from the host's history.
+                        let _ = crate::chat::send(&ip, &room_id, &key, &out);
+                    })
+                })
+                .collect();
+            for w in workers {
+                let _ = w.join();
+            }
+        });
+        Ok(stored)
+    }
+
+    /// Checks a request from another member: right key, from inside the room.
+    fn peer_ok(&self, id: &str, key: &str, from: &std::net::IpAddr) -> Result<Room, String> {
+        let room = self.room_by_id(id).ok_or("unknown room")?;
+        let c = room.parsed();
+        if !room.active || key != peer_key(&c.network_secret()) {
+            return Err("wrong key".into());
+        }
+        if !in_cidr(from, &c.cidr()) {
+            return Err("not from the room network".into());
+        }
+        Ok(room)
+    }
+
+    pub fn peer_message(&self, id: &str, key: &str, from: &std::net::IpAddr, mut msg: ChatMsg) -> Result<(), String> {
+        self.peer_ok(id, key, from)?;
+        msg.text = msg.text.chars().take(MAX_CHAT_TEXT).collect();
+        msg.from = clean_nickname(&msg.from);
+        msg.from_ip = from.to_string();
+        msg.mine = false;
+        if let Some(f) = msg.file.as_mut() {
+            f.name = belfry_proto::sanitize_file_name(&f.name);
+        }
+        self.chat.insert(id, msg);
+        Ok(())
+    }
+
+    pub fn peer_history(&self, id: &str, key: &str, from: &std::net::IpAddr) -> Result<Vec<ChatMsg>, String> {
+        self.peer_ok(id, key, from)?;
+        Ok(self.chat.recent(id, 200))
+    }
+
+    /// Guests pull the host's recent history to fill gaps.
+    pub fn sync_chats(&self) {
+        let rooms: Vec<Room> = self
+            .rooms
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.active && r.role == Role::Guest)
+            .cloned()
+            .collect();
+        for room in rooms {
+            let id = room.id();
+            let Some(v) = self.view(&id) else { continue };
+            let Some(my_ip) = v.my_ip.clone() else { continue };
+            if v.state != RoomState::Online {
+                continue;
+            }
+            if let Ok(msgs) = crate::chat::fetch_history(&v.host_ip, &id, &v.peer_key) {
+                for mut m in msgs {
+                    m.mine = m.from_ip == my_ip;
+                    m.from = clean_nickname(&m.from);
+                    if let Some(f) = m.file.as_mut() {
+                        f.name = belfry_proto::sanitize_file_name(&f.name);
+                    }
+                    self.chat.insert(&id, m);
+                }
+            }
+        }
+    }
+
     pub fn stop_all(&self) {
         let mut runs = self.runs.lock().unwrap();
         for (_, r) in runs.drain() {
@@ -360,6 +474,9 @@ impl Daemon {
             code: None,
             public_addrs: vec![],
             port: c.port,
+            chat_seq: self.chat.last_seq(id),
+            peer_key: peer_key(&c.network_secret()),
+            cidr: c.cidr(),
         };
         if room.role == Role::Host {
             let p = self.public.lock().unwrap().clone();

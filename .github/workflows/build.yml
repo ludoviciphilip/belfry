@@ -27,6 +27,8 @@ jobs:
           unshare -rn bash scripts/e2e-netns.sh | tee e2e.txt
           grep -q "TCP: b'pong:tcp-hunter'" e2e.txt
           grep -q "UDP: b'pong:udp-hunter'" e2e.txt
+          grep -q "recuperou após .*: 1" e2e.txt
+          grep -q "not from the room network" e2e.txt
 
   bundle:
     needs: test

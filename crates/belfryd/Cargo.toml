@@ -10,6 +10,7 @@ belfry-proto = { path = "../belfry-proto" }
 serde.workspace = true
 serde_json.workspace = true
 tiny_http = "0.12"
+ureq = { version = "2", default-features = false, features = ["json"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

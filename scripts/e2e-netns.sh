@@ -63,6 +63,27 @@ u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); u.settimeout(5); u.sendto(
 '''
 print(subprocess.run(['nsenter', '-t', bpid, '-n', 'python3', '-c', client], capture_output=True, text=True, timeout=15).stdout.strip())
 EOF
+echo "== chat"
+api A POST /v1/rooms/$ID1/chat '{"text":"Toquem o sino, caçadores"}' | j "'A enviou:', d['text'], d['from_ip']"
+sleep 1
+api B POST /v1/rooms/$ID1/chat '{"text":"a caminho!","file":{"id":"f1","name":"../../etc/passwd","size":3,"token":"t"}}' > /dev/null
+sleep 1
+api B GET "/v1/rooms/$ID1/chat?since=0" | j "'B vê:', [(m['from'], m['text'], m['mine']) for m in d]"
+api A GET "/v1/rooms/$ID1/chat?since=0" | j "'A vê:', [(m['from'], m['text'], m['mine'], m['from_ip'], (m['file'] or {}).get('name')) for m in d]"
+echo "== chat: B offline perde mensagem e recupera do histórico do host"
+api B POST /v1/rooms/$ID1/stop '{}' > /dev/null
+api A POST /v1/rooms/$ID1/chat '{"text":"mensagem enquanto B estava fora"}' > /dev/null
+api B POST /v1/rooms/$ID1/start '{}' > /dev/null
+for i in $(seq 1 40); do
+  n=$(api B GET "/v1/rooms/$ID1/chat?since=0" | j "sum('fora' in m['text'] for m in d)")
+  [ "$n" = 1 ] && break; sleep 1
+done
+echo "recuperou após ${i}s: $n"
+echo "== chat: pedido de fora da sala (pela rede local, sem passar pelo túnel)"
+KEY=$(api A GET /v1/status | j "d['rooms'][0]['peer_key']")
+inB curl -s -X POST -H "X-Belfry-Room: $ID1" -H "X-Belfry-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"id":"x","ts":1,"from":"intruso","text":"oi"}' http://192.168.77.1:47831/p2p/v1/msg; echo
+inB curl -s -H "X-Belfry-Room: $ID1" -H "X-Belfry-Key: errada" http://$HOST1:47831/p2p/v1/history; echo
 echo "== segunda sala ao mesmo tempo"
 R2=$(api A POST /v1/rooms '{"name":"Minecraft","nickname":"Luis"}')
 CODE2=$(echo "$R2" | j "d['code']"); echo "porta da sala 2: $(echo "$R2" | j "d['port']")"

@@ -143,6 +143,22 @@ pub fn install(_o: &Opts) -> Result<(), String> {
         "profile=any",
         &format!("program={}", core.display()),
     ]))?;
+    // Chat (belfryd) and file sharing (the app) take connections from room
+    // members; both check the room key and the source subnet themselves.
+    let _ = sh(Command::new("netsh").args(["advfirewall", "firewall", "delete", "rule", "name=Belfry chat"]));
+    let _ = sh(Command::new("netsh").args(["advfirewall", "firewall", "delete", "rule", "name=Belfry files"]));
+    let _ = sh(Command::new("netsh").args([
+        "advfirewall", "firewall", "add", "rule", "name=Belfry chat", "dir=in", "action=allow",
+        "enable=yes", "profile=any", "protocol=TCP", "localport=47831",
+        &format!("program={}", exe.display()),
+    ]));
+    if let Some(app) = exe.parent().map(|d| d.join("belfry.exe")).filter(|p| p.is_file()) {
+        let _ = sh(Command::new("netsh").args([
+            "advfirewall", "firewall", "add", "rule", "name=Belfry files", "dir=in", "action=allow",
+            "enable=yes", "profile=any", "protocol=TCP", "localport=47832",
+            &format!("program={}", app.display()),
+        ]));
+    }
     service.start::<&str>(&[]).map_err(|e| format!("start: {e}"))?;
     println!("belfryd service installed and started");
     Ok(())
@@ -176,7 +192,9 @@ pub fn uninstall(o: &Opts) -> Result<(), String> {
         wait_stopped(&s);
         s.delete().map_err(|e| e.to_string())?;
     }
-    let _ = sh(Command::new("netsh").args(["advfirewall", "firewall", "delete", "rule", "name=Belfry engine"]));
+    for rule in ["name=Belfry engine", "name=Belfry chat", "name=Belfry files"] {
+        let _ = sh(Command::new("netsh").args(["advfirewall", "firewall", "delete", "rule", rule]));
+    }
     if o.purge {
         let _ = std::fs::remove_dir_all(&o.data_dir);
     }

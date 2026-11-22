@@ -67,7 +67,8 @@ fn handle(daemon: &Daemon, token: &str, mut req: Request) {
         return;
     }
     let url = req.url().to_string();
-    let parts: Vec<&str> = url.trim_matches('/').split('/').collect();
+    let path = url.split('?').next().unwrap_or("").to_string();
+    let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
     let method = req.method().clone();
     let resp = match (&method, parts.as_slice()) {
         (Method::Get, ["v1", "status"]) => json(200, &daemon.status()),
@@ -89,12 +90,75 @@ fn handle(daemon: &Daemon, token: &str, mut req: Request) {
             Ok(()) => json(200, &serde_json::json!({"ok": true})),
             Err(e) => err(404, e),
         },
+        (Method::Get, ["v1", "rooms", id, "chat"]) => {
+            let since = query(&url, "since").and_then(|v| v.parse().ok()).unwrap_or(0);
+            json(200, &daemon.chat.since(id, since))
+        }
+        (Method::Post, ["v1", "rooms", id, "chat"]) => match body::<ChatPost>(&mut req) {
+            Ok(p) => result(daemon.post_chat(id, p)),
+            Err(e) => err(400, e),
+        },
         (Method::Get, ["v1", "rooms", id, "log"]) => {
             Response::from_data(daemon.log_tail(id).into_bytes()).with_status_code(200)
         }
         _ => err(404, "no such endpoint"),
     };
     let _ = req.respond(resp);
+}
+
+fn query<'a>(url: &'a str, key: &str) -> Option<&'a str> {
+    url.split_once('?')?
+        .1
+        .split('&')
+        .find_map(|kv| kv.strip_prefix(key)?.strip_prefix('='))
+}
+
+fn header<'a>(req: &'a Request, name: &'static str) -> &'a str {
+    req.headers()
+        .iter()
+        .find(|h| h.field.equiv(name))
+        .map(|h| h.value.as_str())
+        .unwrap_or("")
+}
+
+/// Listener for other members (chat delivery and history), on every
+/// interface; only requests from the room subnet with the room key pass.
+pub fn serve_peers(daemon: Arc<Daemon>, port: u16) -> std::io::Result<()> {
+    let server = Arc::new(Server::http(("0.0.0.0", port)).map_err(std::io::Error::other)?);
+    let mut workers = Vec::new();
+    for _ in 0..3 {
+        let (server, daemon) = (server.clone(), daemon.clone());
+        workers.push(std::thread::spawn(move || {
+            while let Ok(mut req) = server.recv() {
+                let from = req.remote_addr().map(|a| a.ip());
+                let (room, key) = (header(&req, "X-Belfry-Room").to_string(), header(&req, "X-Belfry-Key").to_string());
+                let path = req.url().split('?').next().unwrap_or("").to_string();
+                let Some(from) = from else {
+                    let _ = req.respond(err(400, "no address"));
+                    continue;
+                };
+                let resp = match (req.method().clone(), path.as_str()) {
+                    (Method::Post, "/p2p/v1/msg") => match body::<ChatMsg>(&mut req) {
+                        Ok(m) => match daemon.peer_message(&room, &key, &from, m) {
+                            Ok(()) => json(200, &serde_json::json!({"ok": true})),
+                            Err(e) => err(403, e),
+                        },
+                        Err(e) => err(400, e),
+                    },
+                    (Method::Get, "/p2p/v1/history") => match daemon.peer_history(&room, &key, &from) {
+                        Ok(h) => json(200, &h),
+                        Err(e) => err(403, e),
+                    },
+                    _ => err(404, "no such endpoint"),
+                };
+                let _ = req.respond(resp);
+            }
+        }));
+    }
+    for w in workers {
+        let _ = w.join();
+    }
+    Ok(())
 }
 
 fn result<T: serde::Serialize>(r: Result<T, String>) -> Response<std::io::Cursor<Vec<u8>>> {

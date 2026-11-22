@@ -11,6 +11,7 @@ Belfry is a small, free alternative to Hamachi and Radmin VPN for Windows and Li
 - **No account, no member limit, no central server.** The PC that creates the room is the room's server. Nothing goes through Belfry's own infrastructure, because there is none.
 - **Direct connections.** Players connect peer-to-peer (UDP/TCP hole punching, IPv4 and IPv6); when a direct path is impossible, traffic goes through the host.
 - **Encrypted.** Every room has its own random 96-bit secret, and the engine encrypts traffic between members (AES-GCM by default).
+- **Chat and file sharing** inside each room: messages reach everyone directly and the host keeps the history for whoever was away; files are served straight from the sharer's PC (drag a file into the chat) and saved to `Downloads/Belfry`. Nothing is uploaded anywhere.
 - **Several rooms at once**, each with its own subnet and virtual adapter.
 - **Light**: one small window; the networking runs in a background service, so you can close the window (or keep it in the tray) while playing.
 - **Updates itself** (Windows installer and Linux AppImage): signed updates from GitHub Releases, checked on start.

@@ -1,7 +1,7 @@
 {
   "name": "belfry",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Tauri CLI for building Belfry (the UI itself is plain HTML/CSS/JS in ui/)",
   "license": "MIT",
   "scripts": {

@@ -22,6 +22,21 @@ let updating = null; // null | { done, total } while downloading
 let serviceUpdating = false;
 const listen = (ev, fn) => window.__TAURI__.event.listen(ev, fn);
 
+// Chat state
+let chatRoom = null; // id of the room whose chat is open
+const chats = {}; // id -> [ChatMsg] sorted by ts
+const fetchedSeq = {}; // id -> highest seq fetched
+const lastSeen = JSON.parse(localStorage.getItem("belfry.seen") || "{}"); // id -> seq read
+const downloads = JSON.parse(localStorage.getItem("belfry.downloads") || "{}"); // msg id -> {done,total,path,error}
+let myShares = new Set();
+let dragging = false;
+const saveSeen = () => localStorage.setItem("belfry.seen", JSON.stringify(lastSeen));
+const saveDownloads = () => {
+  const keep = {};
+  for (const [k, v] of Object.entries(downloads)) if (v.path) keep[k] = { path: v.path, done: v.done, total: v.total };
+  localStorage.setItem("belfry.downloads", JSON.stringify(keep));
+};
+
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -56,6 +71,7 @@ async function refresh() {
     if (json !== lastJson) {
       status = s;
       lastJson = json;
+      await syncChats();
       render();
       syncTray();
     } else if (!$(".room-list") && !$(".empty")) {
@@ -137,6 +153,10 @@ function render() {
     setHTML(view, `<div class="loading"><div class="spinner"></div></div>`);
     return;
   }
+  if (chatRoom) {
+    $("#actions").hidden = true;
+    return renderChat(view);
+  }
   if (status.rooms.length === 0) {
     setHTML(view, `
       <section class="empty">
@@ -146,6 +166,7 @@ function render() {
       </section>`);
     return;
   }
+  if (view.querySelector("#chat-panel")) view.innerHTML = "";
   const order = { online: 0, starting: 1, error: 2, off: 3 };
   const rooms = [...status.rooms].sort((a, b) => (order[a.state] - order[b.state]) || a.name.localeCompare(b.name));
   setHTML(view, `<section class="room-list">${rooms.map(roomCard).join("")}</section>`);
@@ -250,6 +271,9 @@ function roomCard(r) {
           <span class="sub"><span class="role ${r.role}">${esc(isHost ? t("host") : t("guest"))}</span> · ${esc(stateLabel(r.state))} · ${esc(r.nickname)}</span>
         </div>
         ${isHost ? `<button class="icon-btn small" data-act="code" data-id="${r.id}" title="${esc(t("copyCode"))}"><svg viewBox="0 0 24 24"><path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7A3.1 3.1 0 0 1 3.9 12ZM8 13h8v-2H8v2Zm9-6h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4a5 5 0 0 0 0-10Z"/></svg></button>` : ""}
+        <button class="icon-btn small chat-btn" data-act="chat" data-id="${r.id}" title="${esc(t("chat"))}"><svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2Zm0 14H5.2L4 17.2V4h16v12Z"/></svg>${
+          unread(r) ? `<span class="badge">${unread(r) > 9 ? "9+" : unread(r)}</span>` : ""
+        }</button>
         <label class="switch" title="${esc(r.active ? t("stOnline") : t("stOff"))}">
           <input type="checkbox" data-toggle="${r.id}" ${r.active ? "checked" : ""}>
           <span></span>
@@ -344,6 +368,210 @@ async function installUpdate() {
   }
 }
 
+
+// ---------- chat ----------
+
+function unread(r) {
+  const seen = lastSeen[r.id] || 0;
+  return (chats[r.id] || []).filter((m) => m.seq > seen && !m.mine).length;
+}
+
+async function syncChats() {
+  if (!status) return;
+  for (const r of status.rooms) {
+    const have = fetchedSeq[r.id];
+    if (have !== undefined && r.chat_seq <= have) continue;
+    let msgs;
+    try {
+      msgs = await invoke("chat_list", { id: r.id, since: have || 0 });
+    } catch {
+      continue;
+    }
+    const first = have === undefined;
+    const list = (chats[r.id] = chats[r.id] || []);
+    for (const m of msgs) if (!list.some((x) => x.id === m.id)) list.push(m);
+    list.sort((a, b) => a.ts - b.ts || a.seq - b.seq);
+    fetchedSeq[r.id] = Math.max(have || 0, ...msgs.map((m) => m.seq), r.chat_seq);
+    if (first) {
+      // First look after start: don't notify about old messages.
+      if (lastSeen[r.id] === undefined) lastSeen[r.id] = fetchedSeq[r.id];
+      continue;
+    }
+    const fresh = msgs.filter((m) => !m.mine);
+    const watching = chatRoom === r.id && !document.hidden;
+    if (watching) {
+      lastSeen[r.id] = fetchedSeq[r.id];
+    } else {
+      for (const m of fresh.slice(-3)) notify(r, m);
+    }
+  }
+  saveSeen();
+}
+
+function notify(room, m) {
+  const body = m.file ? `📎 ${m.file.name}` : m.text;
+  invoke("plugin:notification|notify", { options: { title: `${m.from} · ${room.name}`, body } }).catch(() => {});
+}
+
+function fmtSize(n) {
+  if (n < 1024) return `${n} B`;
+  const u = ["KB", "MB", "GB", "TB"];
+  let i = -1;
+  do {
+    n /= 1024;
+    i++;
+  } while (n >= 1024 && i < u.length - 1);
+  return `${n.toFixed(n < 10 ? 1 : 0)} ${u[i]}`;
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const hm = d.toLocaleTimeString(LANG === "pt" ? "pt-BR" : "en", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return hm;
+  return `${d.toLocaleDateString(LANG === "pt" ? "pt-BR" : "en", { day: "2-digit", month: "short" })} ${hm}`;
+}
+
+function linkify(text) {
+  return esc(text).replace(/https?:\/\/[^\s<]+/g, (u) => `<a href="#" data-url="${u}">${u}</a>`);
+}
+
+function fileCard(m) {
+  const f = m.file;
+  const d = downloads[m.id];
+  let action = "";
+  if (m.mine) {
+    action = myShares.has(f.id)
+      ? `<span class="fstate">${esc(t("sharing"))}</span><button class="btn tiny ghost" data-act="unshare" data-file="${esc(f.id)}">${esc(t("stopSharing"))}</button>`
+      : `<span class="fstate off">${esc(t("notShared"))}</span>`;
+  } else if (d && d.path) {
+    action = `<span class="fstate ok">✓ ${esc(t("downloaded"))}</span><button class="btn tiny" data-act="reveal" data-msg="${esc(m.id)}">${esc(t("showFolder"))}</button>`;
+  } else if (d && !d.error) {
+    const pct = d.total ? Math.round((100 * d.done) / d.total) : 0;
+    action = `<span class="progress"><span style="width:${pct}%"></span></span><span class="fstate">${pct}%</span>`;
+  } else {
+    action = `${d && d.error ? `<span class="fstate bad" title="${esc(d.error)}">${esc(tErr(d.error))}</span>` : ""}
+      <button class="btn tiny primary" data-act="download" data-msg="${esc(m.id)}">${esc(d && d.error ? t("retry") : t("download"))}</button>`;
+  }
+  return `<div class="file">
+      <svg viewBox="0 0 24 24" class="ficon"><path d="M14 2H6a2 2 0 0 0-2 2v16c0 1.1.9 2 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm4 18H6V4h7v5h5v11Z"/></svg>
+      <div class="fmeta"><span class="fname" title="${esc(f.name)}">${esc(f.name)}</span><span class="fsize">${fmtSize(f.size)}</span></div>
+      <div class="factions">${action}</div>
+    </div>`;
+}
+
+function messageHtml(m, prev) {
+  const grouped = prev && prev.from_ip === m.from_ip && prev.from === m.from && m.ts - prev.ts < 5 * 60 * 1000;
+  const who = grouped || m.mine ? "" : `<span class="mfrom" style="--h:${hue(m.from)}">${esc(m.from)}</span>`;
+  const body = m.file ? fileCard(m) : `<div class="mtext">${linkify(m.text)}</div>`;
+  return `<div class="msg ${m.mine ? "mine" : ""} ${grouped ? "grouped" : ""}" data-key="${esc(m.id)}">
+      ${who}
+      <div class="bubble">${body}<span class="mtime">${esc(fmtTime(m.ts))}</span></div>
+    </div>`;
+}
+
+function renderChat(view) {
+  const r = findRoom(chatRoom);
+  if (!r) {
+    chatRoom = null;
+    return render();
+  }
+  if (!view.querySelector(`#chat-panel[data-room="${r.id}"]`)) {
+    view.innerHTML = `
+      <section id="chat-panel" data-room="${esc(r.id)}">
+        <div class="chat-head">
+          <button class="icon-btn small" data-act="chat-back" aria-label="back"><svg viewBox="0 0 24 24"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2Z"/></svg></button>
+          <div class="title"><h3 id="chat-title"></h3><span class="sub" id="chat-sub"></span></div>
+        </div>
+        <div class="chat-msgs" id="chat-msgs"></div>
+        <form class="composer" id="composer">
+          <button type="button" class="icon-btn" data-act="attach" title="${esc(t("attach"))}"><svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6h-1.5Z"/></svg></button>
+          <textarea id="chat-input" rows="1" maxlength="2000" placeholder="${esc(t("typeMessage"))}"></textarea>
+          <button class="icon-btn send" title="${esc(t("send"))}"><svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2v7Z"/></svg></button>
+        </form>
+        <div class="drop-hint" id="drop-hint"><div>${esc(t("dropToShare"))}</div></div>
+      </section>`;
+    const input = $("#chat-input");
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) {
+        ev.preventDefault();
+        $("#composer").requestSubmit();
+      }
+    });
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 120) + "px";
+    });
+    $("#composer").addEventListener("submit", sendChat);
+    setTimeout(() => input.focus(), 30);
+    view.dataset.stick = "1";
+  }
+  const online = r.members.length;
+  $("#chat-title").textContent = r.name;
+  $("#chat-sub").textContent =
+    r.state === "online" ? t("chatOnline", { n: online }) : `${stateLabel(r.state)} · ${t("chatOffline")}`;
+  $("#drop-hint").classList.toggle("show", dragging);
+  const box = $("#chat-msgs");
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80 || view.dataset.stick === "1";
+  const msgs = chats[r.id] || [];
+  const html = msgs.length
+    ? msgs.map((m, i) => messageHtml(m, msgs[i - 1])).join("")
+    : `<div class="chat-empty" data-key="empty"><img src="bell.svg" alt=""><p>${esc(t("chatEmpty"))}</p></div>`;
+  setHTML(box, html);
+  if (nearBottom) box.scrollTop = box.scrollHeight;
+  view.dataset.stick = "";
+  lastSeen[r.id] = fetchedSeq[r.id] || 0;
+  saveSeen();
+}
+
+async function sendChat(ev) {
+  ev.preventDefault();
+  const input = $("#chat-input");
+  const text = input.value.trim();
+  if (!text || !chatRoom) return;
+  try {
+    const m = await invoke("chat_send", { id: chatRoom, text });
+    input.value = "";
+    input.style.height = "auto";
+    addLocal(chatRoom, m);
+  } catch (e) {
+    toast(cleanErr(e), true);
+  }
+}
+
+function addLocal(id, m) {
+  const list = (chats[id] = chats[id] || []);
+  if (!list.some((x) => x.id === m.id)) list.push(m);
+  fetchedSeq[id] = Math.max(fetchedSeq[id] || 0, m.seq);
+  $("#view").dataset.stick = "1";
+  render();
+}
+
+async function shareFiles(paths) {
+  if (!chatRoom) return;
+  for (const path of paths) {
+    try {
+      const m = await invoke("share_file", { id: chatRoom, path });
+      myShares.add(m.file.id);
+      addLocal(chatRoom, m);
+    } catch (e) {
+      toast(cleanErr(e), true);
+    }
+  }
+}
+
+async function refreshShares() {
+  try {
+    myShares = new Set(await invoke("my_shares"));
+  } catch {}
+}
+
+function openChat(id) {
+  chatRoom = id;
+  openMenu = null;
+  render();
+}
+
 // ---------- tray & closing ----------
 
 function syncTray() {
@@ -398,6 +626,11 @@ function findRoom(id) {
 }
 
 document.addEventListener("click", async (ev) => {
+  const urlEl = ev.target.closest("[data-url]");
+  if (urlEl) {
+    ev.preventDefault();
+    return invoke("plugin:opener|open_url", { url: urlEl.dataset.url }).catch(() => {});
+  }
   const copyEl = ev.target.closest("[data-copy]");
   if (copyEl) return copy(copyEl.dataset.copy);
 
@@ -418,6 +651,42 @@ document.addEventListener("click", async (ev) => {
     case "update":
       installUpdate();
       break;
+    case "chat":
+      openChat(id);
+      break;
+    case "chat-back":
+      chatRoom = null;
+      render();
+      break;
+    case "attach": {
+      try {
+        const picked = await invoke("plugin:dialog|open", { options: { multiple: true, directory: false } });
+        const paths = picked == null ? [] : Array.isArray(picked) ? picked : [picked];
+        await shareFiles(paths.map((p) => (typeof p === "string" ? p : p.path)));
+      } catch (e) {
+        toast(cleanErr(e), true);
+      }
+      break;
+    }
+    case "unshare":
+      await invoke("unshare_file", { fileId: act.dataset.file });
+      await refreshShares();
+      render();
+      break;
+    case "download": {
+      const r = findRoom(chatRoom);
+      const m = (chats[chatRoom] || []).find((x) => x.id === act.dataset.msg);
+      if (!r || !m) return;
+      downloads[m.id] = { done: 0, total: m.file.size };
+      render();
+      invoke("download_file", { msgId: m.id, ip: m.from_ip, file: m.file, key: r.peer_key });
+      break;
+    }
+    case "reveal": {
+      const d = downloads[act.dataset.msg];
+      if (d && d.path) invoke("plugin:opener|reveal_item_in_dir", { paths: [d.path] }).catch((e) => toast(String(e), true));
+      break;
+    }
     case "svc-update":
       serviceUpdating = true;
       renderBanner();
@@ -469,6 +738,9 @@ document.addEventListener("click", async (ev) => {
       if (ok) {
         try {
           await invoke("delete_room", { id });
+          invoke("forget_room_shares", { id }).catch(() => {});
+          delete chats[id];
+          delete fetchedSeq[id];
         } catch (e) {
           toast(cleanErr(e), true);
         }
@@ -639,6 +911,36 @@ $("#dlg-close").addEventListener("click", async (ev) => {
   await invoke(action === "tray" ? "hide_window" : "quit_app");
 });
 
+listen("download-progress", (ev) => {
+  const p = ev.payload;
+  downloads[p.msg_id] = { done: p.done, total: p.total, path: p.path, error: p.error };
+  if (p.path) {
+    toast(t("savedTo", { path: p.path }));
+    saveDownloads();
+  }
+  if (chatRoom) render();
+});
+
+listen("tauri://drag-enter", () => {
+  if (!chatRoom) return;
+  dragging = true;
+  render();
+});
+listen("tauri://drag-leave", () => {
+  dragging = false;
+  if (chatRoom) render();
+});
+listen("tauri://drag-drop", (ev) => {
+  dragging = false;
+  if (!chatRoom) return render();
+  render();
+  shareFiles((ev.payload && ev.payload.paths) || []);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && chatRoom) render();
+});
+
 listen("update-progress", (ev) => {
   const [done, total] = ev.payload;
   updating = { done, total: total || 0 };
@@ -660,6 +962,7 @@ $("#link-repo").onclick = (ev) => {
     trayOk = await invoke("tray_available");
   } catch {}
   applyCloseAction();
+  await refreshShares();
   render();
   await refresh();
   syncTray();

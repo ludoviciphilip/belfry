@@ -11,6 +11,7 @@ O Belfry é uma alternativa pequena e gratuita ao Hamachi e ao Radmin VPN, pra W
 - **Sem conta, sem limite de pessoas, sem servidor central.** O PC de quem cria a sala é o servidor da sala.
 - **Conexão direta** entre os jogadores (hole punching UDP/TCP, IPv4 e IPv6); quando não dá, o tráfego passa pelo host.
 - **Criptografado**: cada sala tem um segredo aleatório próprio.
+- **Chat e troca de arquivos** em cada sala: as mensagens vão direto pra todo mundo e o host guarda o histórico pra quem estava fora; os arquivos saem direto do PC de quem compartilhou (é só arrastar pro chat) e vão pra `Downloads/Belfry`. Nada é enviado pra servidor nenhum.
 - **Várias salas ao mesmo tempo**, cada uma com sua sub-rede e seu adaptador virtual.
 - **Leve**: a rede roda num serviço em segundo plano, então dá pra fechar a janela (ou deixar na bandeja) enquanto joga.
 - **Se atualiza sozinho** (instalador do Windows e AppImage no Linux): atualizações assinadas, verificadas ao abrir.

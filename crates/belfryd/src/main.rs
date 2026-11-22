@@ -8,6 +8,7 @@
 //!   belfryd version
 
 mod api;
+mod chat;
 mod daemon;
 mod engine;
 mod install;
@@ -82,6 +83,23 @@ pub fn run_daemon(o: &Opts, stop: Arc<AtomicBool>) -> Result<(), String> {
                 eprintln!("API failed on {listen}: {e}");
                 std::process::exit(2);
             }
+        });
+    }
+    {
+        let d = d.clone();
+        let port = std::env::var("BELFRY_PEER_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(belfry_proto::PEER_PORT);
+        std::thread::spawn(move || {
+            if let Err(e) = api::serve_peers(d, port) {
+                // Chat is optional: rooms keep working without it.
+                eprintln!("chat listener failed on port {port}: {e}");
+            }
+        });
+    }
+    {
+        let d = d.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(15));
+            d.sync_chats();
         });
     }
     while !stop.load(Ordering::Relaxed) {
