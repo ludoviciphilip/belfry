@@ -17,7 +17,9 @@ inB() { nsenter -t $BPID -n "$@"; }
 BELFRY_DATA_DIR=$W/A BELFRY_ADVERTISE_V4=192.168.77.1 BELFRY_ADVERTISE_V6=none \
   $D run --engine-dir "$ENG" > $W/A.out 2>&1 & APID=$!
 BELFRY_DATA_DIR=$W/B BELFRY_ADVERTISE_V4=none BELFRY_ADVERTISE_V6=none \
-  nsenter -t $BPID -n $D run --engine-dir "$ENG" > $W/B.out 2>&1 &
+  nsenter -t $BPID -n $D run --engine-dir "$ENG" > $W/B.out 2>&1 & BDPID=$!
+# Whatever happens, stop both daemons (they stop their engines) on exit.
+trap 'kill $APID $BDPID 2>/dev/null; wait 2>/dev/null; kill $BPID 2>/dev/null' EXIT
 sleep 1
 api() { # api A|B METHOD PATH [json]
   local who=$1 m=$2 p=$3 body=${4:-}
@@ -79,4 +81,4 @@ BELFRY_DATA_DIR=$W/A BELFRY_ADVERTISE_V4=192.168.77.1 BELFRY_ADVERTISE_V6=none \
 sleep 9
 api A GET /v1/status | j "[(r['name'], r['state'], len(r['members'])) for r in d['rooms']]"
 echo "== log do daemon A"; head -3 $W/A.out
-kill $APID %1 2>/dev/null; inB pkill belfryd; sleep 1
+echo "== fim"
