@@ -433,6 +433,24 @@ fn main() {
             if let Err(e) = build_tray(app) {
                 eprintln!("tray unavailable: {e}");
             }
+            // Release check: BELFRY_SELFTEST_UPDATE=1 updates without any clicks
+            // and logs each step to stderr.
+            if std::env::var_os("BELFRY_SELFTEST_UPDATE").is_some() {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    eprintln!("selftest: running {VERSION}, checking for updates");
+                    match check_update(handle.clone()).await {
+                        Ok(Some(u)) => {
+                            eprintln!("selftest: found {} (can_install={})", u.version, u.can_install);
+                            if let Err(e) = install_update(handle).await {
+                                eprintln!("selftest: install failed: {e}");
+                            }
+                        }
+                        Ok(None) => eprintln!("selftest: no update"),
+                        Err(e) => eprintln!("selftest: check failed: {e}"),
+                    }
+                });
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
