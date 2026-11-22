@@ -12,7 +12,8 @@ Belfry is a small, free alternative to Hamachi and Radmin VPN for Windows and Li
 - **Direct connections.** Players connect peer-to-peer (UDP/TCP hole punching, IPv4 and IPv6); when a direct path is impossible, traffic goes through the host.
 - **Encrypted.** Every room has its own random 96-bit secret, and the engine encrypts traffic between members (AES-GCM by default).
 - **Several rooms at once**, each with its own subnet and virtual adapter.
-- **Light**: one small window; the networking runs in a background service, so you can close the window while playing.
+- **Light**: one small window; the networking runs in a background service, so you can close the window (or keep it in the tray) while playing.
+- **Updates itself** (Windows installer and Linux AppImage): signed updates from GitHub Releases, checked on start.
 
 The networking engine is [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), shipped unmodified. Belfry adds the app, the room codes, the service that manages one engine process per room, and the installers.
 

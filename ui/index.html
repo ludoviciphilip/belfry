@@ -17,6 +17,7 @@
     </button>
   </header>
 
+  <div id="banner"></div>
   <main id="view"></main>
 
   <footer class="actions" id="actions" hidden>
@@ -89,6 +90,17 @@
           <option value="en">English</option>
         </select>
       </label>
+      <label id="close-setting"><span data-i18n="onClose"></span>
+        <select name="closeAction">
+          <option value="ask" data-i18n="closeAsk"></option>
+          <option value="tray" data-i18n="closeTray"></option>
+          <option value="quit" data-i18n="closeQuit"></option>
+        </select>
+      </label>
+      <div class="check-row">
+        <label class="check"><input type="checkbox" name="autoUpdate"> <span data-i18n="autoUpdate"></span></label>
+        <button type="button" class="btn small" id="btn-check-update" data-i18n="checkNow"></button>
+      </div>
       <details>
         <summary data-i18n="advanced"></summary>
         <label><span data-i18n="relay"></span>
@@ -105,6 +117,19 @@
       <div class="row end">
         <button type="button" class="btn ghost" data-close data-i18n="cancel"></button>
         <button class="btn primary" data-i18n="save"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Close -->
+  <dialog id="dlg-close">
+    <form method="dialog" class="sheet" id="form-close">
+      <h2 data-i18n="closeTitle"></h2>
+      <p class="hint" data-i18n="closeText"></p>
+      <label class="check"><input type="checkbox" name="remember" checked> <span data-i18n="remember"></span></label>
+      <div class="row end">
+        <button type="button" class="btn ghost" data-close-action="quit" data-i18n="closeQuitBtn"></button>
+        <button type="button" class="btn primary" data-close-action="tray" data-i18n="closeTrayBtn"></button>
       </div>
     </form>
   </dialog>

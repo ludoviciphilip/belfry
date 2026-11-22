@@ -12,7 +12,8 @@ O Belfry é uma alternativa pequena e gratuita ao Hamachi e ao Radmin VPN, pra W
 - **Conexão direta** entre os jogadores (hole punching UDP/TCP, IPv4 e IPv6); quando não dá, o tráfego passa pelo host.
 - **Criptografado**: cada sala tem um segredo aleatório próprio.
 - **Várias salas ao mesmo tempo**, cada uma com sua sub-rede e seu adaptador virtual.
-- **Leve**: a rede roda num serviço em segundo plano, então dá pra fechar a janela enquanto joga.
+- **Leve**: a rede roda num serviço em segundo plano, então dá pra fechar a janela (ou deixar na bandeja) enquanto joga.
+- **Se atualiza sozinho** (instalador do Windows e AppImage no Linux): atualizações assinadas, verificadas ao abrir.
 
 O motor de rede é o [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), distribuído sem modificações.
 

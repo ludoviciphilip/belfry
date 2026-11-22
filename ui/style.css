@@ -392,6 +392,32 @@ pre#log-text {
   white-space: pre-wrap; word-break: break-all; user-select: text;
 }
 
+/* ---------- banner ---------- */
+
+#banner { padding: 0 16px; }
+.banner {
+  display: flex; align-items: center; gap: 10px;
+  margin: 4px 0 8px; padding: 8px 8px 8px 14px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(240, 168, 74, 0.16), rgba(240, 168, 74, 0.06));
+  border: 1px solid rgba(240, 168, 74, 0.35);
+  font-size: 12.5px;
+  animation: rise 0.25s ease-out;
+}
+.banner > span:first-child { flex: 1; }
+.banner .btn.small { margin: 0; height: 30px; padding: 0 12px; }
+.progress {
+  width: 110px; height: 6px; border-radius: 99px;
+  background: rgba(0, 0, 0, 0.35); overflow: hidden; margin-right: 6px;
+}
+.progress span { display: block; height: 100%; background: var(--accent2); transition: width 0.2s; }
+
+label.check { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; cursor: pointer; }
+label.check > span { display: inline; margin: 0; font-size: 13px; font-weight: 400; color: var(--text); }
+label.check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.check-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; }
+.check-row .btn.small { margin: 0; white-space: nowrap; flex: none; }
+
 /* ---------- toast ---------- */
 
 #toast {

@@ -12,10 +12,11 @@ tauri-build = { version = "2", features = [] }
 belfry-proto = { path = "../crates/belfry-proto" }
 serde.workspace = true
 serde_json.workspace = true
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
 ureq = { version = "2", default-features = false, features = ["json"] }
 
 [features]

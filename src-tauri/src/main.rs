@@ -6,8 +6,13 @@ use belfry_proto::code::RoomCode;
 use belfry_proto::*;
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
-use tauri::Manager;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, Manager, WindowEvent};
+use tauri_plugin_updater::UpdaterExt;
 
 fn base_url() -> String {
     std::env::var("BELFRY_URL").unwrap_or_else(|_| format!("http://{DAEMON_ADDR}"))
@@ -234,15 +239,175 @@ fn wait_for_service() -> Result<(), String> {
     Err("the service was installed but is not answering yet".into())
 }
 
+
+// ---------- tray ----------
+
+/// Tray state shared with the window-close handler.
+struct Tray {
+    available: AtomicBool,
+    /// What the X button does: "ask" (UI shows a dialog), "tray" or "quit".
+    close_action: Mutex<String>,
+    open: Mutex<Option<MenuItem<tauri::Wry>>>,
+    quit: Mutex<Option<MenuItem<tauri::Wry>>>,
+}
+
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// Linux trays need a StatusNotifier host (KDE, GNOME + extension, Waybar,
+/// Caelestia...). Without one the icon would be invisible, so closing must
+/// really close.
+#[cfg(target_os = "linux")]
+fn tray_host_present() -> bool {
+    std::process::Command::new("busctl")
+        .args(["--user", "--no-pager", "list"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("StatusNotifierWatcher"))
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn tray_host_present() -> bool {
+    true
+}
+
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "open", "Open Belfry", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Belfry", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &quit])?;
+    TrayIconBuilder::with_id("main")
+        .icon(app.default_window_icon().cloned().expect("app icon"))
+        .tooltip("Belfry")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, ev| match ev.id.as_ref() {
+            "open" => show_main(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, ev| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                show_main(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    let state = app.state::<Tray>();
+    *state.open.lock().unwrap() = Some(open);
+    *state.quit.lock().unwrap() = Some(quit);
+    state.available.store(tray_host_present(), Ordering::Relaxed);
+    Ok(())
+}
+
+#[tauri::command]
+fn tray_available(tray: tauri::State<Tray>) -> bool {
+    tray.available.load(Ordering::Relaxed)
+}
+
+/// The UI sends its translated labels and a status line for the tooltip.
+#[tauri::command]
+fn update_tray(app: tauri::AppHandle, tray: tauri::State<Tray>, open: String, quit: String, tooltip: String) {
+    if let Some(i) = tray.open.lock().unwrap().as_ref() {
+        let _ = i.set_text(open);
+    }
+    if let Some(i) = tray.quit.lock().unwrap().as_ref() {
+        let _ = i.set_text(quit);
+    }
+    if let Some(t) = app.tray_by_id("main") {
+        let _ = t.set_tooltip(Some(tooltip));
+    }
+}
+
+#[tauri::command]
+fn set_close_action(tray: tauri::State<Tray>, action: String) {
+    if ["ask", "tray", "quit"].contains(&action.as_str()) {
+        *tray.close_action.lock().unwrap() = action;
+    }
+}
+
+#[tauri::command]
+fn hide_window(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+// ---------- updates ----------
+
+#[derive(Serialize)]
+struct UpdateInfo {
+    version: String,
+    notes: Option<String>,
+    /// false = this kind of install can't replace itself (deb/rpm): send the
+    /// user to the releases page instead.
+    can_install: bool,
+}
+
+fn self_updatable() -> bool {
+    if cfg!(target_os = "linux") {
+        std::env::var_os("APPIMAGE").is_some()
+    } else {
+        true
+    }
+}
+
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(update.map(|u| UpdateInfo { version: u.version.clone(), notes: u.body.clone(), can_install: self_updatable() }))
+}
+
+/// Downloads, verifies the signature, installs and restarts. Progress goes
+/// to the UI as `update-progress` events (downloaded, total bytes).
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("no update available")?;
+    let mut done: u64 = 0;
+    let progress = app.clone();
+    update
+        .download_and_install(
+            move |chunk, total| {
+                done += chunk as u64;
+                let _ = progress.emit("update-progress", (done, total));
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    // Windows never gets here: the installer closes the app and reopens it.
+    app.restart();
+}
+
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
-        }))
+        .manage(Tray {
+            available: AtomicBool::new(false),
+            close_action: Mutex::new("ask".into()),
+            open: Mutex::new(None),
+            quit: Mutex::new(None),
+        })
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -255,8 +420,43 @@ fn main() {
             room_log,
             preview_code,
             app_info,
-            install_service
+            install_service,
+            tray_available,
+            update_tray,
+            set_close_action,
+            hide_window,
+            quit_app,
+            check_update,
+            install_update
         ])
+        .setup(|app| {
+            if let Err(e) = build_tray(app) {
+                eprintln!("tray unavailable: {e}");
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // With a tray, the X button hides the window; the UI decides
+            // (first time it asks). Without a tray, X closes as usual.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let tray = window.app_handle().state::<Tray>();
+                if !tray.available.load(Ordering::Relaxed) {
+                    return;
+                }
+                let action = tray.close_action.lock().unwrap().clone();
+                match action.as_str() {
+                    "quit" => {}
+                    "tray" => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    _ => {
+                        api.prevent_close();
+                        let _ = window.emit("close-requested", ());
+                    }
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Belfry");
 }

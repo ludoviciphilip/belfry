@@ -3,7 +3,7 @@ const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
 const $ = (sel, root = document) => root.querySelector(sel);
 
 const settings = Object.assign(
-  { nickname: "", lang: "auto", relay: "" },
+  { nickname: "", lang: "auto", relay: "", closeAction: "ask", autoUpdate: true },
   JSON.parse(localStorage.getItem("belfry.settings") || "{}")
 );
 function saveSettings() {
@@ -16,6 +16,11 @@ let problem = null; // { kind: "service" | "token", detail }
 let openMenu = null; // room id whose menu is open
 let installing = false;
 let info = { version: "?", os: "linux" };
+let trayOk = false;
+let update = null; // { version, notes, can_install } when a newer release exists
+let updating = null; // null | { done, total } while downloading
+let serviceUpdating = false;
+const listen = (ev, fn) => window.__TAURI__.event.listen(ev, fn);
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -52,6 +57,7 @@ async function refresh() {
       status = s;
       lastJson = json;
       render();
+      syncTray();
     } else if (!$(".room-list") && !$(".empty")) {
       render();
     }
@@ -70,26 +76,79 @@ async function refresh() {
 
 // ---------- rendering ----------
 
+// Patch the live DOM to match new markup instead of replacing it: no flicker,
+// no replayed animations, hover/focus survive the 2-second refresh.
+function keyOf(n) {
+  return n.nodeType === 1 ? n.getAttribute("data-key") : null;
+}
+function morph(from, to) {
+  if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName) {
+    from.replaceWith(to);
+    return;
+  }
+  if (from.nodeType !== 1) {
+    if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue;
+    return;
+  }
+  for (const a of [...from.attributes]) if (!to.hasAttribute(a.name)) from.removeAttribute(a.name);
+  for (const a of [...to.attributes]) if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
+  if (from.tagName === "INPUT" && from.type === "checkbox") from.checked = to.hasAttribute("checked");
+  morphChildren(from, to);
+}
+function morphChildren(from, to) {
+  const oldKeyed = new Map();
+  for (const c of from.childNodes) if (keyOf(c)) oldKeyed.set(keyOf(c), c);
+  let cursor = from.firstChild;
+  for (const t of [...to.childNodes]) {
+    const k = keyOf(t);
+    let match = null;
+    if (k && oldKeyed.has(k)) {
+      match = oldKeyed.get(k);
+      oldKeyed.delete(k);
+    } else if (!k && cursor && !keyOf(cursor) && cursor.nodeName === t.nodeName) {
+      match = cursor;
+    }
+    if (match) {
+      if (match !== cursor) from.insertBefore(match, cursor);
+      else cursor = cursor.nextSibling;
+      morph(match, t);
+    } else {
+      from.insertBefore(t, cursor);
+    }
+  }
+  while (cursor) {
+    const next = cursor.nextSibling;
+    cursor.remove();
+    cursor = next;
+  }
+}
+function setHTML(el, html) {
+  const tpl = document.createElement(el.tagName);
+  tpl.innerHTML = html;
+  morphChildren(el, tpl);
+}
+
 function render() {
   const view = $("#view");
   $("#actions").hidden = !!problem || !status;
   if (problem) return renderSetup(view);
+  renderBanner();
   if (!status) {
-    view.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+    setHTML(view, `<div class="loading"><div class="spinner"></div></div>`);
     return;
   }
   if (status.rooms.length === 0) {
-    view.innerHTML = `
+    setHTML(view, `
       <section class="empty">
         <img src="bell.svg" alt="" class="hero-bell">
         <h1>${esc(t("emptyTitle"))}</h1>
         <p>${esc(t("emptyText"))}</p>
-      </section>`;
+      </section>`);
     return;
   }
   const order = { online: 0, starting: 1, error: 2, off: 3 };
   const rooms = [...status.rooms].sort((a, b) => (order[a.state] - order[b.state]) || a.name.localeCompare(b.name));
-  view.innerHTML = `<section class="room-list">${rooms.map(roomCard).join("")}</section>`;
+  setHTML(view, `<section class="room-list">${rooms.map(roomCard).join("")}</section>`);
 }
 
 function stateLabel(s) {
@@ -112,14 +171,23 @@ function memberRow(m) {
     m.link === "me"
       ? ""
       : `<span class="lat ${latencyClass(m.latency_ms)}">${m.latency_ms != null ? Math.round(m.latency_ms) + " ms" : "—"}</span>
-         <span class="link ${m.link}">${esc(m.link === "direct" ? t("direct") : t("relayed"))}</span>`;
+         <span class="link ${m.link}" title="${esc(m.protocol)}">${esc(m.link === "direct" ? t("direct") : t("relayed"))}${
+           ipFamily(m.protocol) ? ` · ${ipFamily(m.protocol)}` : ""
+         }</span>`;
   return `
-    <li class="member">
+    <li class="member" data-key="${esc(m.ip)}">
       <span class="avatar" style="--h:${hue(m.name)}">${initial}</span>
       <span class="who"><span class="name">${esc(m.name)}</span>${tags.join("")}</span>
       <button class="ip mono" data-copy="${esc(m.ip)}" title="${esc(t("copyCode"))}">${esc(m.ip)}</button>
       ${right}
     </li>`;
+}
+
+// "tcp6,udp6" -> IPv6, "udp" -> IPv4: tells the host which path friends use.
+function ipFamily(proto) {
+  const p = String(proto || "").split(",").filter((x) => x && x !== "-");
+  if (!p.length) return "";
+  return p.some((x) => x.endsWith("6")) ? "IPv6" : "IPv4";
 }
 
 function hue(s) {
@@ -174,7 +242,7 @@ function roomCard(r) {
         </div>`
       : "";
   return `
-    <article class="room ${r.state} ${r.active ? "" : "inactive"}" data-id="${r.id}">
+    <article class="room ${r.state} ${r.active ? "" : "inactive"}" data-id="${r.id}" data-key="${r.id}">
       <div class="room-head">
         <span class="dot ${r.state}" title="${esc(stateLabel(r.state))}"></span>
         <div class="title">
@@ -198,14 +266,14 @@ function renderSetup(view) {
   const isToken = problem.kind === "token";
   const title = isToken ? t("tokenTitle") : t("setupTitle");
   const text = isToken ? t("tokenText") : linux ? t("setupText") : t("setupWin");
-  view.innerHTML = `
+  setHTML(view, `
     <section class="setup">
       <img src="bell.svg" alt="" class="hero-bell dim">
       <h1>${esc(title)}</h1>
       <p>${esc(text)}</p>
       <button class="btn primary big" id="btn-install" ${installing ? "disabled" : ""}>${esc(installing ? t("setupWorking") : t("setupBtn"))}</button>
       <details class="detail"><summary>${esc(t("advanced"))}</summary><code>${esc(problem.detail)}</code></details>
-    </section>`;
+    </section>`);
   $("#btn-install").onclick = installService;
 }
 
@@ -222,6 +290,75 @@ async function installService() {
   installing = false;
   await refresh();
   render();
+}
+
+
+// ---------- banner: app update / outdated service ----------
+
+function renderBanner() {
+  const el = $("#banner");
+  let html = "";
+  if (status && info.version !== "?" && status.version !== info.version && !problem) {
+    html = `<div class="banner" data-key="svc">
+      <span>${esc(t("serviceOutdated", { svc: status.version, app: info.version }))}</span>
+      <button class="btn small primary" data-act="svc-update" ${serviceUpdating ? "disabled" : ""}>${esc(
+        serviceUpdating ? t("setupWorking") : t("updateService")
+      )}</button></div>`;
+  } else if (update) {
+    const pct = updating && updating.total ? Math.round((100 * updating.done) / updating.total) : null;
+    html = `<div class="banner" data-key="upd">
+      <span>${esc(t("updateAvailable", { v: update.version }))}</span>
+      ${
+        updating
+          ? `<span class="progress"><span style="width:${pct ?? 30}%"></span></span>`
+          : `<button class="btn small primary" data-act="update">${esc(update.can_install ? t("updateNow") : t("download"))}</button>`
+      }</div>`;
+  }
+  setHTML(el, html);
+}
+
+async function checkUpdate(manual = false) {
+  try {
+    update = await invoke("check_update");
+    if (manual) toast(update ? t("updateAvailable", { v: update.version }) : t("upToDate"));
+  } catch (e) {
+    if (manual) toast(`${t("updateFailed")}: ${e}`, true);
+  }
+  renderBanner();
+}
+
+async function installUpdate() {
+  if (!update) return;
+  if (!update.can_install) {
+    invoke("plugin:opener|open_url", { url: "https://github.com/ludoviciphilip/belfry/releases/latest" }).catch(() => {});
+    return;
+  }
+  updating = { done: 0, total: 0 };
+  renderBanner();
+  try {
+    await invoke("install_update"); // the app restarts when this succeeds
+  } catch (e) {
+    updating = null;
+    toast(`${t("updateFailed")}: ${e}`, true);
+    renderBanner();
+  }
+}
+
+// ---------- tray & closing ----------
+
+function syncTray() {
+  if (!trayOk) return;
+  const rooms = status ? status.rooms.filter((r) => r.state === "online") : [];
+  const players = rooms.reduce((n, r) => n + r.members.length, 0);
+  const tooltip = rooms.length ? `Belfry · ${t("trayOnline", { n: rooms.length, p: players })}` : "Belfry";
+  const key = [LANG, tooltip].join("|");
+  if (key === syncTray.last) return;
+  syncTray.last = key;
+  invoke("update_tray", { open: t("trayOpen"), quit: t("trayQuit"), tooltip }).catch(() => {});
+}
+
+function applyCloseAction() {
+  invoke("set_close_action", { action: settings.closeAction }).catch(() => {});
 }
 
 // ---------- actions ----------
@@ -278,6 +415,16 @@ document.addEventListener("click", async (ev) => {
   const id = act.dataset.id;
   const room = findRoom(id);
   switch (act.dataset.act) {
+    case "update":
+      installUpdate();
+      break;
+    case "svc-update":
+      serviceUpdating = true;
+      renderBanner();
+      await installService();
+      serviceUpdating = false;
+      renderBanner();
+      break;
     case "menu":
       openMenu = openMenu === id ? null : id;
       render();
@@ -439,6 +586,9 @@ $("#btn-settings").onclick = () => {
   f.nickname.value = settings.nickname;
   f.lang.value = settings.lang;
   f.relay.value = settings.relay;
+  f.closeAction.value = settings.closeAction;
+  f.autoUpdate.checked = settings.autoUpdate;
+  $("#close-setting").hidden = !trayOk;
   $("#service-info").innerHTML = `
     <div><span>${esc(t("app"))}</span><span class="mono">${esc(info.version)}</span></div>
     <div><span>${esc(t("service"))}</span><span class="mono">${esc(status ? status.version : "—")}</span></div>
@@ -452,9 +602,13 @@ $("#form-settings").addEventListener("submit", (ev) => {
   settings.nickname = f.nickname.value.trim();
   settings.lang = f.lang.value;
   settings.relay = f.relay.value.trim();
+  settings.closeAction = f.closeAction.value;
+  settings.autoUpdate = f.autoUpdate.checked;
   saveSettings();
+  applyCloseAction();
   LANG = pickLang(settings.lang);
   applyI18n();
+  syncTray();
   $("#dlg-settings").close();
   render();
 });
@@ -463,6 +617,33 @@ $("#btn-reinstall").onclick = () => {
   $("#dlg-settings").close();
   installService();
 };
+
+$("#btn-check-update").onclick = () => checkUpdate(true);
+
+// X button with a tray: ask once, then remember (Settings can change it).
+listen("close-requested", () => {
+  const f = $("#form-close");
+  f.remember.checked = true;
+  openDialog("#dlg-close");
+});
+$("#dlg-close").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-close-action]");
+  if (!b) return;
+  const action = b.dataset.closeAction;
+  if ($("#form-close").remember.checked) {
+    settings.closeAction = action;
+    saveSettings();
+    applyCloseAction();
+  }
+  $("#dlg-close").close();
+  await invoke(action === "tray" ? "hide_window" : "quit_app");
+});
+
+listen("update-progress", (ev) => {
+  const [done, total] = ev.payload;
+  updating = { done, total: total || 0 };
+  renderBanner();
+});
 
 $("#link-repo").onclick = (ev) => {
   ev.preventDefault();
@@ -476,8 +657,15 @@ $("#link-repo").onclick = (ev) => {
   applyI18n();
   try {
     info = await invoke("app_info");
+    trayOk = await invoke("tray_available");
   } catch {}
+  applyCloseAction();
   render();
   await refresh();
+  syncTray();
   setInterval(refresh, 2000);
+  if (settings.autoUpdate) {
+    setTimeout(checkUpdate, 4000);
+    setInterval(checkUpdate, 6 * 3600 * 1000);
+  }
 })();
