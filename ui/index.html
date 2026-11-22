@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Belfry</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="bell.svg" alt="" class="logo">
+      <span class="wordmark">Belfry</span>
+    </div>
+    <button class="icon-btn" id="btn-settings" data-i18n-title="settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.3 7.3 0 0 0-1.69-.98l-.38-2.65A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.49.49 0 0 0 .12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66a.49.49 0 0 0-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65a7.3 7.3 0 0 0 1.69-.98l2.49 1.01c.22.08.49 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.66Z"/></svg>
+    </button>
+  </header>
+
+  <main id="view"></main>
+
+  <footer class="actions" id="actions" hidden>
+    <button class="btn primary" id="btn-create"><span class="plus">+</span> <span data-i18n="createRoom"></span></button>
+    <button class="btn" id="btn-join" data-i18n="joinRoom"></button>
+  </footer>
+
+  <!-- Create -->
+  <dialog id="dlg-create">
+    <form method="dialog" class="sheet" id="form-create">
+      <h2 data-i18n="createTitle"></h2>
+      <label><span data-i18n="roomName"></span>
+        <input name="name" maxlength="40" required autocomplete="off" data-i18n-placeholder="roomNamePh">
+      </label>
+      <label><span data-i18n="yourName"></span>
+        <input name="nickname" maxlength="24" required autocomplete="off">
+      </label>
+      <p class="hint" data-i18n="createHint"></p>
+      <div class="row end">
+        <button type="button" class="btn ghost" data-close data-i18n="cancel"></button>
+        <button class="btn primary" data-i18n="create"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Join -->
+  <dialog id="dlg-join">
+    <form method="dialog" class="sheet" id="form-join">
+      <h2 data-i18n="joinTitle"></h2>
+      <label><span data-i18n="code"></span>
+        <textarea name="code" rows="3" required spellcheck="false" autocomplete="off" data-i18n-placeholder="codePh"></textarea>
+      </label>
+      <div class="preview" id="join-preview" hidden></div>
+      <label><span data-i18n="yourName"></span>
+        <input name="nickname" maxlength="24" required autocomplete="off">
+      </label>
+      <div class="row end">
+        <button type="button" class="btn ghost" data-close data-i18n="cancel"></button>
+        <button class="btn primary" data-i18n="join"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Share code -->
+  <dialog id="dlg-share">
+    <div class="sheet">
+      <h2 data-i18n="shareTitle"></h2>
+      <p class="hint" data-i18n="shareHint"></p>
+      <div class="code-box" id="share-code"></div>
+      <div class="addr-note" id="share-addrs"></div>
+      <div class="row end">
+        <button class="btn ghost" data-close data-i18n="close"></button>
+        <button class="btn primary" id="btn-copy-share" data-i18n="copyCode"></button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Settings -->
+  <dialog id="dlg-settings">
+    <form method="dialog" class="sheet" id="form-settings">
+      <h2 data-i18n="settings"></h2>
+      <label><span data-i18n="yourName"></span>
+        <input name="nickname" maxlength="24" autocomplete="off">
+        <small data-i18n="nickHint"></small>
+      </label>
+      <label><span data-i18n="language"></span>
+        <select name="lang">
+          <option value="auto" data-i18n="langAuto"></option>
+          <option value="pt">Português (Brasil)</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <details>
+        <summary data-i18n="advanced"></summary>
+        <label><span data-i18n="relay"></span>
+          <input name="relay" autocomplete="off" spellcheck="false" placeholder="tcp://my-server.example.com:11010">
+          <small data-i18n="relayHint"></small>
+        </label>
+        <div class="service-info" id="service-info"></div>
+        <button type="button" class="btn small" id="btn-reinstall" data-i18n="reinstall"></button>
+      </details>
+      <p class="about">
+        <a href="#" id="link-repo">github.com/ludoviciphilip/belfry</a> · MIT ·
+        <span data-i18n="poweredBy"></span>
+      </p>
+      <div class="row end">
+        <button type="button" class="btn ghost" data-close data-i18n="cancel"></button>
+        <button class="btn primary" data-i18n="save"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Rename -->
+  <dialog id="dlg-rename">
+    <form method="dialog" class="sheet" id="form-rename">
+      <h2 data-i18n="menuName"></h2>
+      <label><span data-i18n="newName"></span>
+        <input name="nickname" maxlength="24" required autocomplete="off">
+      </label>
+      <div class="row end">
+        <button type="button" class="btn ghost" data-close data-i18n="cancel"></button>
+        <button class="btn primary" data-i18n="save"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Log -->
+  <dialog id="dlg-log">
+    <div class="sheet wide">
+      <h2 data-i18n="log"></h2>
+      <pre id="log-text"></pre>
+      <div class="row end">
+        <button class="btn ghost" data-close data-i18n="close"></button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Confirm -->
+  <dialog id="dlg-confirm">
+    <form method="dialog" class="sheet">
+      <h2 id="confirm-title"></h2>
+      <p class="hint" id="confirm-text"></p>
+      <div class="row end">
+        <button value="no" class="btn ghost" data-i18n="cancel"></button>
+        <button value="yes" class="btn danger" id="confirm-yes"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" role="status"></div>
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

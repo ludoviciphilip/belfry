@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Belfry",
+  "mainBinaryName": "belfry",
+  "version": "0.1.0",
+  "identifier": "io.github.ludoviciphilip.belfry",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Belfry",
+        "width": 470,
+        "height": 740,
+        "minWidth": 380,
+        "minHeight": 540,
+        "backgroundColor": "#0e0c10"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "appimage", "deb", "rpm"],
+    "category": "Game",
+    "shortDescription": "Virtual LAN rooms for playing with friends",
+    "longDescription": "Create a room, send the code, play together as if you were on the same network. Built on the EasyTier engine.",
+    "copyright": "MIT License",
+    "license": "MIT",
+    "homepage": "https://github.com/ludoviciphilip/belfry",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/belfryd"],
+    "resources": {
+      "engine/": "engine/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "./windows/hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "languages": ["English", "PortugueseBR"],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+target/
+node_modules/
+.cache/
+src-tauri/engine/
+src-tauri/binaries/
+src-tauri/gen/
+*.log

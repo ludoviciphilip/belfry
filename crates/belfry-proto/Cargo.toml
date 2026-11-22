@@ -1,0 +1,10 @@
+[package]
+name = "belfry-proto"
+description = "Belfry room codes and daemon API types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+getrandom.workspace = true

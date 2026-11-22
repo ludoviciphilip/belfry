@@ -1,0 +1,15 @@
+{
+  "name": "belfry",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tauri CLI for building Belfry (the UI itself is plain HTML/CSS/JS in ui/)",
+  "license": "MIT",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "bash scripts/build-daemon.sh debug && tauri dev",
+    "build": "bash scripts/build-daemon.sh release && tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

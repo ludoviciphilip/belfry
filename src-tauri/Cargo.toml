@@ -1,0 +1,22 @@
+[package]
+name = "belfry"
+description = "Belfry: virtual LAN rooms for playing with friends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+belfry-proto = { path = "../crates/belfry-proto" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
+ureq = { version = "2", default-features = false, features = ["json"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
