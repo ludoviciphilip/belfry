@@ -440,6 +440,7 @@ main:has(#chat-panel) { padding: 0; overflow: hidden; display: flex; }
   border-radius: 14px 14px 4px 14px;
 }
 .msg.mine.grouped .bubble { border-top-right-radius: 6px; }
+.msg.pending .bubble { opacity: 0.6; }
 .mtext { white-space: pre-wrap; word-break: break-word; }
 .mtext a { color: var(--accent2); }
 .mtime { display: block; text-align: right; font-size: 10.5px; color: var(--faint); margin-top: 2px; }

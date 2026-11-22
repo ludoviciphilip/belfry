@@ -250,6 +250,26 @@ async fn chat_list(id: String, since: u64) -> Result<Vec<ChatMsg>, String> {
     blocking(move || call("GET", &format!("/v1/rooms/{id}/chat?since={since}"), None)).await
 }
 
+/// Long-poll: returns the service's chat version once it changes (or ~25 s).
+#[tauri::command]
+async fn chat_wait(since: u64) -> Result<u64, String> {
+    blocking(move || {
+        let token = std::fs::read_to_string(token_path()).map_err(|e| format!("NO_TOKEN: {e}"))?;
+        let r: serde_json::Value = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(800))
+            .timeout(Duration::from_secs(35))
+            .build()
+            .get(&format!("{}/v1/chat/wait?since={since}", base_url()))
+            .set("Authorization", &format!("Bearer {}", token.trim()))
+            .call()
+            .map_err(|e| e.to_string())?
+            .into_json()
+            .map_err(|e| e.to_string())?;
+        r["version"].as_u64().ok_or_else(|| "bad answer".into())
+    })
+    .await
+}
+
 #[tauri::command]
 async fn chat_send(id: String, text: String) -> Result<ChatMsg, String> {
     let body = serde_json::to_value(ChatPost { text, file: None }).unwrap();
@@ -500,6 +520,7 @@ fn main() {
             check_update,
             install_update,
             chat_list,
+            chat_wait,
             chat_send,
             share_file,
             unshare_file,

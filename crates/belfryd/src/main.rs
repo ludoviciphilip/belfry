@@ -102,6 +102,13 @@ pub fn run_daemon(o: &Opts, stop: Arc<AtomicBool>) -> Result<(), String> {
             d.sync_chats();
         });
     }
+    {
+        let d = d.clone();
+        std::thread::spawn(move || loop {
+            d.refresh_views();
+            std::thread::sleep(Duration::from_millis(1500));
+        });
+    }
     while !stop.load(Ordering::Relaxed) {
         d.supervise();
         std::thread::sleep(Duration::from_secs(1));

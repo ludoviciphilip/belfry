@@ -376,11 +376,11 @@ function unread(r) {
   return (chats[r.id] || []).filter((m) => m.seq > seen && !m.mine).length;
 }
 
-async function syncChats() {
+async function syncChats(force = false) {
   if (!status) return;
   for (const r of status.rooms) {
     const have = fetchedSeq[r.id];
-    if (have !== undefined && r.chat_seq <= have) continue;
+    if (!force && have !== undefined && r.chat_seq <= have) continue;
     let msgs;
     try {
       msgs = await invoke("chat_list", { id: r.id, since: have || 0 });
@@ -391,12 +391,13 @@ async function syncChats() {
     const list = (chats[r.id] = chats[r.id] || []);
     for (const m of msgs) if (!list.some((x) => x.id === m.id)) list.push(m);
     list.sort((a, b) => a.ts - b.ts || a.seq - b.seq);
-    fetchedSeq[r.id] = Math.max(have || 0, ...msgs.map((m) => m.seq), r.chat_seq);
+    fetchedSeq[r.id] = Math.max(have || 0, ...msgs.map((m) => m.seq), force ? 0 : r.chat_seq);
     if (first) {
       // First look after start: don't notify about old messages.
       if (lastSeen[r.id] === undefined) lastSeen[r.id] = fetchedSeq[r.id];
       continue;
     }
+    if (!msgs.length) continue;
     const fresh = msgs.filter((m) => !m.mine);
     const watching = chatRoom === r.id && !document.hidden;
     if (watching) {
@@ -464,7 +465,7 @@ function messageHtml(m, prev) {
   const grouped = prev && prev.from_ip === m.from_ip && prev.from === m.from && m.ts - prev.ts < 5 * 60 * 1000;
   const who = grouped || m.mine ? "" : `<span class="mfrom" style="--h:${hue(m.from)}">${esc(m.from)}</span>`;
   const body = m.file ? fileCard(m) : `<div class="mtext">${linkify(m.text)}</div>`;
-  return `<div class="msg ${m.mine ? "mine" : ""} ${grouped ? "grouped" : ""}" data-key="${esc(m.id)}">
+  return `<div class="msg ${m.mine ? "mine" : ""} ${grouped ? "grouped" : ""} ${m.pending ? "pending" : ""}" data-key="${esc(m.id)}">
       ${who}
       <div class="bubble">${body}<span class="mtime">${esc(fmtTime(m.ts))}</span></div>
     </div>`;
@@ -529,12 +530,21 @@ async function sendChat(ev) {
   const input = $("#chat-input");
   const text = input.value.trim();
   if (!text || !chatRoom) return;
+  const id = chatRoom;
+  const r = findRoom(id);
+  // Show it right away; the service's copy replaces it when it answers.
+  const temp = { id: "pending-" + Date.now(), seq: 0, ts: Date.now(), from: r ? r.nickname : "", from_ip: r ? r.my_ip : "", text, mine: true, pending: true };
+  input.value = "";
+  input.style.height = "auto";
+  addLocal(id, temp);
   try {
-    const m = await invoke("chat_send", { id: chatRoom, text });
-    input.value = "";
-    input.style.height = "auto";
-    addLocal(chatRoom, m);
+    const m = await invoke("chat_send", { id, text });
+    chats[id] = (chats[id] || []).filter((x) => x.id !== temp.id);
+    addLocal(id, m);
   } catch (e) {
+    chats[id] = (chats[id] || []).filter((x) => x.id !== temp.id);
+    if (!input.value) input.value = text; // give the text back
+    render();
     toast(cleanErr(e), true);
   }
 }
@@ -570,6 +580,27 @@ function openChat(id) {
   chatRoom = id;
   openMenu = null;
   render();
+}
+
+// The service answers chat_wait the moment any room gets a message.
+async function chatLoop() {
+  let version = 0;
+  for (;;) {
+    try {
+      const t0 = Date.now();
+      const v = await invoke("chat_wait", { since: version });
+      const changed = v !== version;
+      version = v;
+      if (changed && status) {
+        await syncChats(true);
+        render();
+      } else if (Date.now() - t0 < 1000) {
+        await new Promise((ok) => setTimeout(ok, 1000)); // never spin
+      }
+    } catch {
+      await new Promise((ok) => setTimeout(ok, 2000)); // service down/old: polling still covers it
+    }
+  }
 }
 
 // ---------- tray & closing ----------
@@ -967,6 +998,7 @@ $("#link-repo").onclick = (ev) => {
   await refresh();
   syncTray();
   setInterval(refresh, 2000);
+  chatLoop();
   if (settings.autoUpdate) {
     setTimeout(checkUpdate, 4000);
     setInterval(checkUpdate, 6 * 3600 * 1000);

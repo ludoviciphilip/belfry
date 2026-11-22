@@ -25,7 +25,8 @@ pub fn serve(daemon: Arc<Daemon>, listen: &str, token: String) -> std::io::Resul
     let server = Arc::new(Server::http(listen).map_err(std::io::Error::other)?);
     let token = Arc::new(token);
     let mut workers = Vec::new();
-    for _ in 0..3 {
+    // Extra workers: the app keeps one request parked in /v1/chat/wait.
+    for _ in 0..8 {
         let (server, daemon, token) = (server.clone(), daemon.clone(), token.clone());
         workers.push(std::thread::spawn(move || {
             while let Ok(req) = server.recv() {
@@ -90,6 +91,11 @@ fn handle(daemon: &Daemon, token: &str, mut req: Request) {
             Ok(()) => json(200, &serde_json::json!({"ok": true})),
             Err(e) => err(404, e),
         },
+        (Method::Get, ["v1", "chat", "wait"]) => {
+            let since = query(&url, "since").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let v = daemon.chat.wait(since, std::time::Duration::from_secs(25));
+            json(200, &serde_json::json!({ "version": v }))
+        }
         (Method::Get, ["v1", "rooms", id, "chat"]) => {
             let since = query(&url, "since").and_then(|v| v.parse().ok()).unwrap_or(0);
             json(200, &daemon.chat.since(id, since))

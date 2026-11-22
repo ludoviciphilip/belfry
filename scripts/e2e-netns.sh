@@ -84,6 +84,27 @@ KEY=$(api A GET /v1/status | j "d['rooms'][0]['peer_key']")
 inB curl -s -X POST -H "X-Belfry-Room: $ID1" -H "X-Belfry-Key: $KEY" -H 'Content-Type: application/json' \
   -d '{"id":"x","ts":1,"from":"intruso","text":"oi"}' http://192.168.77.1:47831/p2p/v1/msg; echo
 inB curl -s -H "X-Belfry-Room: $ID1" -H "X-Belfry-Key: errada" http://$HOST1:47831/p2p/v1/history; echo
+echo "== chat: latência (envio em A até o long-poll de B acordar)"
+sleep 2
+V=$(api B GET "/v1/chat/wait?since=0" | j "d['version']")
+python3 - "$W" "$BPID" "$ID1" "$V" <<'PYEOF'
+import json, subprocess, sys, threading, time, urllib.request
+w, bpid, rid, v = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+ta, tb = open(f"{w}/A/token").read().strip(), open(f"{w}/B/token").read().strip()
+woke = {}
+def waiter():
+    subprocess.run(["nsenter", "-t", bpid, "-n", "curl", "-s", "-H", f"Authorization: Bearer {tb}",
+                    f"http://127.0.0.1:47830/v1/chat/wait?since={v}"], capture_output=True, timeout=30)
+    woke["t"] = time.time()
+th = threading.Thread(target=waiter); th.start(); time.sleep(0.5)
+t0 = time.time()
+req = urllib.request.Request(f"http://127.0.0.1:47830/v1/rooms/{rid}/chat", data=json.dumps({"text": "ping"}).encode(),
+                             headers={"Authorization": f"Bearer {ta}", "Content-Type": "application/json"})
+urllib.request.urlopen(req).read(); t1 = time.time()
+th.join()
+print(f"envio respondeu em {(t1-t0)*1000:.0f} ms; B avisado em {(woke['t']-t0)*1000:.0f} ms")
+PYEOF
+for i in 1 2 3; do curl -s -o /dev/null -w "status A: %{time_total}s\n" -H "Authorization: Bearer $(cat $W/A/token)" http://127.0.0.1:47830/v1/status; done
 echo "== segunda sala ao mesmo tempo"
 R2=$(api A POST /v1/rooms '{"name":"Minecraft","nickname":"Luis"}')
 CODE2=$(echo "$R2" | j "d['code']"); echo "porta da sala 2: $(echo "$R2" | j "d['port']")"

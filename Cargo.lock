@@ -260,7 +260,7 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "belfry"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "belfry-proto",
  "serde",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "belfry-proto"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "getrandom 0.2.17",
  "serde",
@@ -288,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "belfryd"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "belfry-proto",
  "libc",

@@ -57,6 +57,9 @@ pub struct Daemon {
     rooms: Mutex<Vec<Room>>,
     runs: Mutex<HashMap<String, Run>>,
     public: Mutex<Public>,
+    /// Last computed view of each room. Computing one asks the engine
+    /// (100-400 ms), so status and chat answer from here.
+    views: Mutex<HashMap<String, (Instant, RoomView)>>,
 }
 
 fn now() -> u64 {
@@ -88,6 +91,7 @@ impl Daemon {
             rooms: Mutex::new(rooms),
             runs: Mutex::new(HashMap::new()),
             public: Mutex::new(Public::default()),
+            views: Mutex::new(HashMap::new()),
         })
     }
 
@@ -342,7 +346,7 @@ impl Daemon {
         if text.is_empty() && post.file.is_none() {
             return Err("empty message".into());
         }
-        let v = self.view(id).ok_or("room not found")?;
+        let v = self.cached_view(id).ok_or("room not found")?;
         let my_ip = match (v.state, v.my_ip.clone()) {
             (RoomState::Online, Some(ip)) => ip,
             _ => return Err("the room is not connected".into()),
@@ -452,11 +456,52 @@ impl Daemon {
         Status {
             version: VERSION.into(),
             engine_version: self.engine_version.clone(),
-            rooms: ids.iter().filter_map(|id| self.view(id)).collect(),
+            rooms: ids.iter().filter_map(|id| self.cached_view(id)).collect(),
         }
     }
 
+    /// Fresh view (asks the engine), also stored in the cache.
     pub fn view(&self, id: &str) -> Option<RoomView> {
+        let v = self.compute_view(id);
+        let mut views = self.views.lock().unwrap();
+        match &v {
+            Some(v) => {
+                views.insert(id.to_string(), (Instant::now(), v.clone()));
+            }
+            None => {
+                views.remove(id);
+            }
+        }
+        v
+    }
+
+    /// The cached view if it is recent, else a fresh one. Chat counters are
+    /// always current.
+    pub fn cached_view(&self, id: &str) -> Option<RoomView> {
+        let hit = self
+            .views
+            .lock()
+            .unwrap()
+            .get(id)
+            .filter(|(at, _)| at.elapsed() < Duration::from_secs(5))
+            .map(|(_, v)| v.clone());
+        let mut v = match hit {
+            Some(v) => v,
+            None => return self.view(id),
+        };
+        v.chat_seq = self.chat.last_seq(id);
+        Some(v)
+    }
+
+    /// Keeps the cache warm (called from a background thread).
+    pub fn refresh_views(&self) {
+        let ids: Vec<String> = self.rooms.lock().unwrap().iter().map(Room::id).collect();
+        for id in ids {
+            self.view(&id);
+        }
+    }
+
+    fn compute_view(&self, id: &str) -> Option<RoomView> {
         let room = self.rooms.lock().unwrap().iter().find(|r| r.id() == id)?.clone();
         let c = room.parsed();
         let host_ip = c.host_ip().to_string();
