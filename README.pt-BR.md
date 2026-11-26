@@ -1,12 +1,15 @@
 # Belfry
 
-**Salas de LAN virtual pra jogar com os amigos. Crie uma sala, mande o código, joguem como se estivessem na mesma rede.**
+**Salas de LAN virtual pra jogar com os amigos — uma alternativa ao Hamachi, Radmin VPN e ZeroTier. Crie uma sala, mande o código, joguem como se estivessem na mesma rede.**
 
-[English](README.md)
+[![Última versão](https://img.shields.io/github/v/release/ludoviciphilip/belfry)](https://github.com/ludoviciphilip/belfry/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/ludoviciphilip/belfry)](LICENSE)
+
+[Download](https://github.com/ludoviciphilip/belfry/releases/latest) · [English](README.md)
 
 <img src="docs/screenshot-pt.png" width="380" alt="Janela do Belfry">
 
-O Belfry é uma alternativa pequena e gratuita ao Hamachi e ao Radmin VPN, pra Windows e Linux:
+O Belfry é uma alternativa pequena, gratuita e de código aberto ao Hamachi e ao Radmin VPN, pra Windows e Linux:
 
 - **Sem conta, sem limite de pessoas, sem servidor central.** O PC de quem cria a sala é o servidor da sala.
 - **Conexão direta** entre os jogadores (hole punching UDP/TCP, IPv4 e IPv6); quando não dá, o tráfego passa pelo host.
@@ -49,3 +52,5 @@ O PC do host precisa ser alcançável pela internet na porta da sala (aparece no
 ## Licença
 
 MIT. Os binários do EasyTier incluídos são LGPL-3.0; veja `licenses/`.
+
+*Hamachi e LogMeIn são marcas da LogMeIn, Inc.; Radmin VPN é marca da Famatech Corp.; ZeroTier é marca da ZeroTier, Inc. O Belfry é um projeto independente e não é afiliado, patrocinado nem endossado por nenhuma delas.*
