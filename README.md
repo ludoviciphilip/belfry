@@ -1,12 +1,17 @@
 # Belfry
 
-**Virtual LAN rooms for playing with friends. Create a room, send the code, play as if you were on the same network.**
+**Open-source virtual LAN for playing with friends — a Hamachi, Radmin VPN and ZeroTier alternative. Create a room, send the code, play as if you were on the same network.**
 
-[Português](README.pt-BR.md)
+[![Latest release](https://img.shields.io/github/v/release/ludoviciphilip/belfry)](https://github.com/ludoviciphilip/belfry/releases/latest)
+[![Build](https://github.com/ludoviciphilip/belfry/actions/workflows/build.yml/badge.svg)](https://github.com/ludoviciphilip/belfry/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/github/license/ludoviciphilip/belfry)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-informational)](#install)
+
+[Download](https://github.com/ludoviciphilip/belfry/releases/latest) · [Features](#belfry) · [Install](#install) · [Docs](#how-it-works) · [Português](README.pt-BR.md)
 
 <img src="docs/screenshot-en.png" width="380" alt="Belfry window">
 
-Belfry is a small, free alternative to Hamachi and Radmin VPN for Windows and Linux:
+Belfry is a small, free, open-source alternative to Hamachi and Radmin VPN for Windows and Linux — a LAN party app for playing games online with friends over a peer-to-peer virtual LAN:
 
 - **No account, no member limit, no central server.** The PC that creates the room is the room's server. Nothing goes through Belfry's own infrastructure, because there is none.
 - **Direct connections.** Players connect peer-to-peer (UDP/TCP hole punching, IPv4 and IPv6); when a direct path is impossible, traffic goes through the host.
@@ -68,6 +73,16 @@ npm run build                           # builds belfryd + the bundles
 | `crates/belfryd` | Background service: one EasyTier process per room, loopback JSON API with a token, Linux systemd / Windows service install |
 | `src-tauri` | The app (Tauri 2) |
 | `ui` | The interface: plain HTML, CSS and JavaScript, no build step |
+
+## Alternatives
+
+Belfry, Hamachi, Radmin VPN and ZeroTier all let you play LAN-only games over the internet by putting your PC and your friends' PCs on a virtual LAN. The differences:
+
+- **Hamachi** (LogMeIn Hamachi) and **Radmin VPN** are free for small groups but closed-source, Windows-first, and historically capped the number of peers per network.
+- **ZeroTier** is open-source and cross-platform, but needs a (free) account and a controller to manage the network.
+- **Belfry** is open-source, needs no account, and has no member limit: the host's PC is the only "server," using [EasyTier](https://github.com/EasyTier/EasyTier) for peer-to-peer networking. Today it only ships for Windows and Linux.
+
+*Hamachi and LogMeIn are trademarks of LogMeIn, Inc.; Radmin VPN is a trademark of Famatech Corp.; ZeroTier is a trademark of ZeroTier, Inc. Belfry is an independent project and is not affiliated with, sponsored by, or endorsed by any of them.*
 
 ## License
 

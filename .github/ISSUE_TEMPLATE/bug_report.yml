@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in Belfry isn't working as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a room
+        2. Friend joins with code
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Belfry version
+      placeholder: e.g. 0.3.1 (Help → About, or the installer/AppImage filename)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 10/11
+        - Linux (AppImage)
+        - Linux (.deb)
+        - Linux (.rpm)
+    validations:
+      required: true
+  - type: textarea
+    id: network
+    attributes:
+      label: Network setup (if connection-related)
+      description: IPv4/IPv6, CGNAT, router/firewall details, relay server used, etc.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: Anything relevant from the app or from `belfryd`'s logs.
